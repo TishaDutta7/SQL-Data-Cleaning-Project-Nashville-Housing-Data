@@ -1,226 +1,124 @@
-/*
-
-Cleaning Data in SQL Queries
-
-*/
-
-
-Select *
-From NashvilleHousing;
-
---------------------------------------------------------------------------------------------------------------------------
-
--- Standardize Date Format
+/********************************************************************************************
+   STEP 1 — VIEW RAW DATA
+*********************************************************************************************/
+SELECT *
+FROM NashvilleHousing;
 
 
-Select saleDateConverted, CONVERT(Date,SaleDate)
-From NashvilleHousing;
 
+/********************************************************************************************
+   STEP 2 — STANDARDIZE DATE FORMAT
+   In MySQL we convert using DATE() function.
+   If SaleDate column is not already DATE type, create a new one.
+*********************************************************************************************/
 
-Update NashvilleHousing
-SET SaleDate = CONVERT(Date,SaleDate)
-
--- If it doesn't Update properly
-
+-- Add new converted column
 ALTER TABLE NashvilleHousing
-Add SaleDateConverted Date;
+ADD COLUMN SaleDateConverted DATE;
 
-Update NashvilleHousing
-SET SaleDateConverted = CONVERT(Date,SaleDate)
-
-
- --------------------------------------------------------------------------------------------------------------------------
-
--- Populate Property Address data
-
-Select *
-From NashvilleHousing
-Where PropertyAddress is null
-order by ParcelID
+-- Populate it
+UPDATE NashvilleHousing
+SET SaleDateConverted = DATE(SaleDate);
 
 
 
-Select a.ParcelID, a.PropertyAddress, b.ParcelID, b.PropertyAddress, ISNULL(a.PropertyAddress,b.PropertyAddress)
-From NashvilleHousing a
+/********************************************************************************************
+   STEP 3 — POPULATE MISSING PROPERTY ADDRESSES USING SELF JOIN
+*********************************************************************************************/
+
+UPDATE NashvilleHousing a
 JOIN NashvilleHousing b
-	on a.ParcelID = b.ParcelID
-	AND a.[UniqueID ] <> b.[UniqueID ]
-Where a.PropertyAddress is null
-
-
-Update a
-SET PropertyAddress = ISNULL(a.PropertyAddress,b.PropertyAddress)
-From NashvilleHousing a
-JOIN NashvilleHousing b
-	on a.ParcelID = b.ParcelID
-	AND a.[UniqueID ] <> b.[UniqueID ]
-Where a.PropertyAddress is null
+    ON a.ParcelID = b.ParcelID
+   AND a.UniqueID <> b.UniqueID
+SET a.PropertyAddress = b.PropertyAddress
+WHERE a.PropertyAddress IS NULL;
 
 
 
+/********************************************************************************************
+   STEP 4 — SPLIT PROPERTY ADDRESS INTO Address + City
+   Format is "Address, City"
+   MySQL uses SUBSTRING_INDEX() for splitting.
+*********************************************************************************************/
 
---------------------------------------------------------------------------------------------------------------------------
+-- Add new columns
+ALTER TABLE NashvilleHousing
+ADD COLUMN PropertySplitAddress VARCHAR(255),
+ADD COLUMN PropertySplitCity VARCHAR(255);
 
--- Breaking out Address into Individual Columns (Address, City, State)
+-- Populate split address
+UPDATE NashvilleHousing
+SET PropertySplitAddress = SUBSTRING_INDEX(PropertyAddress, ',', 1),
+    PropertySplitCity    = TRIM(SUBSTRING_INDEX(PropertyAddress, ',', -1))
+WHERE PropertyAddress LIKE '%,%';
 
 
-Select PropertyAddress
-From NashvilleHousing
-Where PropertyAddress is null
-order by ParcelID
 
-SELECT
-SUBSTRING(PropertyAddress, 1, CHARINDEX(',', PropertyAddress) -1 ) as Address
-, SUBSTRING(PropertyAddress, CHARINDEX(',', PropertyAddress) + 1 , LEN(PropertyAddress)) as Address
-
-From NashvilleHousing
-
+/********************************************************************************************
+   STEP 5 — SPLIT OWNER ADDRESS INTO Address, City, State
+   Format: "Address, City, State"
+   Using SUBSTRING_INDEX() and nested splits.
+*********************************************************************************************/
 
 ALTER TABLE NashvilleHousing
-Add PropertySplitAddress Nvarchar(255);
+ADD COLUMN OwnerSplitAddress VARCHAR(255),
+ADD COLUMN OwnerSplitCity VARCHAR(255),
+ADD COLUMN OwnerSplitState VARCHAR(255);
 
-Update NashvilleHousing
-SET PropertySplitAddress = SUBSTRING(PropertyAddress, 1, CHARINDEX(',', PropertyAddress) -1 )
-
-
-ALTER TABLE NashvilleHousing
-Add PropertySplitCity Nvarchar(255);
-
-Update NashvilleHousing
-SET PropertySplitCity = SUBSTRING(PropertyAddress, CHARINDEX(',', PropertyAddress) + 1 , LEN(PropertyAddress))
+-- Populate split fields
+UPDATE NashvilleHousing
+SET OwnerSplitAddress = SUBSTRING_INDEX(OwnerAddress, ',', 1),
+    OwnerSplitCity    = TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(OwnerAddress, ',', 2), ',', -1)),
+    OwnerSplitState   = TRIM(SUBSTRING_INDEX(OwnerAddress, ',', -1));
 
 
 
+/********************************************************************************************
+   STEP 6 — STANDARDIZE SoldAsVacant (Y / N → Yes / No)
+*********************************************************************************************/
 
-Select *
-From NashvilleHousing
-
-
-
-
-
-Select OwnerAddress
-From NashvilleHousing
-
-
-Select
-PARSENAME(REPLACE(OwnerAddress, ',', '.') , 3)
-,PARSENAME(REPLACE(OwnerAddress, ',', '.') , 2)
-,PARSENAME(REPLACE(OwnerAddress, ',', '.') , 1)
-From PortfolioProject.dbo.NashvilleHousing
+UPDATE NashvilleHousing
+SET SoldAsVacant = 
+    CASE
+        WHEN SoldAsVacant = 'Y' THEN 'Yes'
+        WHEN SoldAsVacant = 'N' THEN 'No'
+        ELSE SoldAsVacant
+    END;
 
 
 
-ALTER TABLE NashvilleHousing
-Add OwnerSplitAddress Nvarchar(255);
+/********************************************************************************************
+   STEP 7 — REMOVE DUPLICATES USING ROW_NUMBER() (MySQL 8+)
+   Keeping only the first occurrence.
+*********************************************************************************************/
 
-Update NashvilleHousing
-SET OwnerSplitAddress = PARSENAME(REPLACE(OwnerAddress, ',', '.') , 3)
-
-
-ALTER TABLE NashvilleHousing
-Add OwnerSplitCity Nvarchar(255);
-
-Update NashvilleHousing
-SET OwnerSplitCity = PARSENAME(REPLACE(OwnerAddress, ',', '.') , 2)
-
-
-
-ALTER TABLE NashvilleHousing
-Add OwnerSplitState Nvarchar(255);
-
-Update NashvilleHousing
-SET OwnerSplitState = PARSENAME(REPLACE(OwnerAddress, ',', '.') , 1)
-
-
-
-Select *
-From PortfolioProject.dbo.NashvilleHousing
-
-
-
-
---------------------------------------------------------------------------------------------------------------------------
-
-
--- Change Y and N to Yes and No in "Sold as Vacant" field
-
-
-Select Distinct(SoldAsVacant), Count(SoldAsVacant)
-From PortfolioProject.dbo.NashvilleHousing
-Group by SoldAsVacant
-order by 2
-
-
-
-
-Select SoldAsVacant
-, CASE When SoldAsVacant = 'Y' THEN 'Yes'
-	   When SoldAsVacant = 'N' THEN 'No'
-	   ELSE SoldAsVacant
-	   END
-From PortfolioProject.dbo.NashvilleHousing
-
-
-Update NashvilleHousing
-SET SoldAsVacant = CASE When SoldAsVacant = 'Y' THEN 'Yes'
-	   When SoldAsVacant = 'N' THEN 'No'
-	   ELSE SoldAsVacant
-	   END
-
-
-
-
-
-
------------------------------------------------------------------------------------------------------------------------------------------------------------
-
--- Remove Duplicates
-
-WITH RowNumCTE AS(
-Select *,
-	ROW_NUMBER() OVER (
-	PARTITION BY ParcelID,
-				 PropertyAddress,
-				 SalePrice,
-				 SaleDate,
-				 LegalReference
-				 ORDER BY
-					UniqueID
-					) row_num
-
-From PortfolioProject.dbo.NashvilleHousing
---order by ParcelID
+WITH RowNumCTE AS (
+    SELECT 
+        UniqueID,
+        ROW_NUMBER() OVER (
+            PARTITION BY ParcelID, PropertyAddress, SalePrice, SaleDateConverted, LegalReference
+            ORDER BY UniqueID
+        ) AS row_num
+    FROM NashvilleHousing
 )
-Select *
-From RowNumCTE
-Where row_num > 1
-Order by PropertyAddress
+DELETE FROM NashvilleHousing
+WHERE UniqueID IN (
+    SELECT UniqueID
+    FROM (
+        SELECT UniqueID
+        FROM RowNumCTE
+        WHERE row_num > 1
+    ) AS temp
+);
 
 
 
-Select *
-From PortfolioProject.dbo.NashvilleHousing
+/********************************************************************************************
+   STEP 8 — DELETE UNUSED COLUMNS
+*********************************************************************************************/
 
-
-
-
----------------------------------------------------------------------------------------------------------
-
--- Delete Unused Columns
-
-
-
-Select *
-From PortfolioProject.dbo.NashvilleHousing
-
-
-ALTER TABLE PortfolioProject.dbo.NashvilleHousing
-DROP COLUMN OwnerAddress, TaxDistrict, PropertyAddress, SaleDate
-
-
-
-
-
-
-
+ALTER TABLE NashvilleHousing
+DROP COLUMN OwnerAddress,
+DROP COLUMN TaxDistrict,
+DROP COLUMN PropertyAddress,
+DROP COLUMN SaleDate;
